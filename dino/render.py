@@ -65,8 +65,10 @@ def camera(bg, mode, p, f):
     x0 = max(0, min(bw - vw, x0)); y0 = max(0, min(bh - vh, y0))
     frame = bg.crop((int(x0), int(y0), int(x0 + vw), int(y0 + vh))).resize((W, H), Image.BILINEAR)
     if ang:
-        frame = frame.rotate(ang, resample=Image.BILINEAR).crop((0, 0, W, H))
-        frame = frame.resize((W, H))
+        frame = frame.rotate(ang, resample=Image.BILINEAR)
+        k = abs(math.cos(math.radians(ang))) + (W / H) * abs(math.sin(math.radians(ang)))  # zoom in to hide rotated corners
+        cw, ch = W / k, H / k
+        frame = frame.crop((int((W - cw) / 2), int((H - ch) / 2), int((W + cw) / 2), int((H + ch) / 2))).resize((W, H), Image.BILINEAR)
     return frame
 
 def place_kapa(frame, mode, p, t, dur, amp, f):
@@ -90,7 +92,7 @@ def place_kapa(frame, mode, p, t, dur, amp, f):
         if t < dur * 0.55:
             x += int(8 * math.sin(f * 2.7))  # trembling
         else:
-            img = kapa_flip
+            img = kapa  # keep the shirt text readable
             q = ease((t - dur * 0.55) / (dur * 0.45))
             x = int(120 - (kapa.width + 160) * q * 1.6) if False else int(120 + (W + 200) * q)
             y += int(-25 * abs(math.sin(f / 2)))
