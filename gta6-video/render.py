@@ -113,25 +113,39 @@ def palm(x0, base_y, height, lean, scale=1.0, flip=False):
     d.ellipse([tx - 18 * scale, ty - 12 * scale, tx + 18 * scale, ty + 18 * scale], fill=col)
     return layer
 
-def build_bg_loop(n=30):
-    base = sky()
-    palms = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    for p in [palm(1840, H + 20, 700, -160, 1.25), palm(1700, H + 40, 540, 90, 1.0), palm(-30, H + 20, 600, 120, 1.0)]:
-        palms = Image.alpha_composite(palms, p)
-    frames = []
-    for i in range(n):
-        ph = i / n
-        f = base.copy()
-        f = Image.alpha_composite(f, sun_layer(ph))
-        f = Image.alpha_composite(f, ground_layer(ph))
-        f = Image.alpha_composite(f, palms)
-        # left-side darkening so text pops
-        frames.append(f)
+ART = Image.open("art.jpg").convert("RGB")
+PX, PY, PW, PH = 1330, 40, 500, 1000          # right-side art panel
+
+def build_bg_loop(n=1):
+    big = ART.resize((W, int(ART.height * W / ART.width)), Image.LANCZOS).filter(ImageFilter.GaussianBlur(28))
+    arr = np.asarray(big).astype(np.float32) * 0.55
+    arr[..., 0] *= 1.08; arr[..., 2] *= 1.12                      # purple-ish grade
+    big = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
     shade = np.zeros((H, W, 4), np.uint8)
     xs = np.linspace(1, 0, W)
-    shade[..., 3] = (np.clip(xs * 1.4 - 0.25, 0, 1) * 170).astype(np.uint8)[None, :]
-    shade = Image.fromarray(shade, "RGBA")
-    return [Image.alpha_composite(f, shade).convert("RGB") for f in frames]
+    shade[..., 3] = (np.clip(xs * 1.3 - 0.1, 0, 1) * 150).astype(np.uint8)[None, :]
+    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(glow).rounded_rectangle([PX - 6, PY - 6, PX + PW + 6, PY + PH + 6], radius=34, fill=PINK + (230,))
+    glow = glow.filter(ImageFilter.GaussianBlur(26))
+    return {"big": big, "shade": Image.fromarray(shade, "RGBA"), "glow": glow}
+
+PANEL_MASK = Image.new("L", (PW, PH), 0)
+ImageDraw.Draw(PANEL_MASK).rounded_rectangle([0, 0, PW - 1, PH - 1], radius=28, fill=255)
+
+def base_frame(t, seg_since):
+    big = BG["big"]
+    span = big.height - H
+    y = int(span * (0.5 + 0.5 * math.sin(t / DUR * 2 * math.pi - math.pi / 2)))   # slow pan down and back
+    frame = big.crop((0, y, W, y + H)).convert("RGBA")
+    frame.alpha_composite(BG["shade"]); frame.alpha_composite(BG["glow"])
+    z = 1.0 + 0.07 * min(1.0, seg_since / 8.0)                                  # Ken Burns per segment
+    cw, ch = ART.width / z, ART.height / z
+    cx, cy = ART.width / 2, ART.height * 0.52
+    crop = ART.crop((int(cx - cw / 2), int(cy - ch / 2), int(cx + cw / 2), int(cy + ch / 2)))
+    crop = crop.resize((PW, PH), Image.BILINEAR)
+    frame.paste(crop, (PX, PY), PANEL_MASK)
+    ImageDraw.Draw(frame).rounded_rectangle([PX, PY, PX + PW - 1, PY + PH - 1], radius=28, outline=PINK, width=4)
+    return frame
 
 # ---------------------------------------------------------------- text helpers
 def glow_text(size, draw_fn, glow_col, radius=14, strength=2):
@@ -171,7 +185,7 @@ def fact_card(n):
     # headline
     size = 120
     while True:
-        fh = font(BLACK_I, size); lines = wrap(f["head"].upper(), fh, 1050)
+        fh = font(BLACK_I, size); lines = wrap(f["head"].upper(), fh, 1120)
         if len(lines) <= 2 or size <= 80: break
         size -= 8
     y = 425
@@ -198,6 +212,7 @@ def title_card(kind):
         sub = "COMMENT  •  LIKE  •  SUBSCRIBE"
     y = 230
     for text, fn, col, gcol in rows:
+        while fn.getlength(text) > 1150: fn = font(BLACK_I, fn.size - 6)
         x = 110
         def dr(d, gc, text=text, fn=fn, col=col, x=x, y=y): d.text((x, y), text, font=fn, fill=gc or col)
         sh = Image.new("RGBA", (W, H), (0, 0, 0, 0)); ImageDraw.Draw(sh).text((x + 8, y + 8), text, font=fn, fill=gcol)
@@ -211,19 +226,20 @@ def title_card(kind):
     return layer
 
 FN_CAP = font(BOLD, 46)
+CX = 700
 @lru_cache(maxsize=64)
 def caption(seg_i, hi):
     seg = SEGS[seg_i]
     words = seg["text"].split()
-    lines = wrap(seg["text"], FN_CAP, 1500)
+    lines = wrap(seg["text"], FN_CAP, 1080)
     layer = Image.new("RGBA", (W, H), (0, 0, 0, 0)); d = ImageDraw.Draw(layer)
     lh = 62; total_h = lh * len(lines)
     y0 = H - 95 - total_h
     maxw = max(FN_CAP.getlength(l) for l in lines)
-    d.rounded_rectangle([W / 2 - maxw / 2 - 34, y0 - 20, W / 2 + maxw / 2 + 34, y0 + total_h + 14], radius=22, fill=(8, 0, 20, 185))
+    d.rounded_rectangle([CX - maxw / 2 - 34, y0 - 20, CX + maxw / 2 + 34, y0 + total_h + 14], radius=22, fill=(8, 0, 20, 185))
     idx = 0
     for li, ln in enumerate(lines):
-        x = W / 2 - FN_CAP.getlength(ln) / 2; y = y0 + li * lh
+        x = CX - FN_CAP.getlength(ln) / 2; y = y0 + li * lh
         for w in ln.split():
             col = YELLOW if idx == hi else (WHITE if idx < hi or hi < 0 else (205, 195, 220))
             if idx == hi:
@@ -266,9 +282,9 @@ def seg_at(t):
 
 def render_frame(fi):
     t = fi / FPS
-    frame = BG[fi % len(BG)].copy().convert("RGBA")
     si = seg_at(t); seg = SEGS[si]
     since = t - (seg["start"] - 0.25)
+    frame = base_frame(t, since)
     key = seg["key"]
     card = title_card(key) if key in ("intro", "outro") else fact_card(int(key[4:]))
     e = ease(since / 0.35)
@@ -282,7 +298,6 @@ def render_frame(fi):
     ov = Image.new("RGBA", (W, H), (0, 0, 0, 0)); d = ImageDraw.Draw(ov)
     n_done = 0 if key == "intro" else (35 if key == "outro" else int(key[4:]) - 1)
     progress(d, n_done, n_done if key.startswith("fact") else -1)
-    d.text((W - 110, 52), "35 QUICK FACTS  •  GTA 6", font=font(BOLD, 26), fill=(255, 255, 255, 150), anchor="ra")
     frame.alpha_composite(ov)
     if since < 0.12 and si > 0:                         # flash on cut
         fl = Image.new("RGBA", (W, H), (255, 255, 255, int(110 * (1 - since / 0.12)))); frame.alpha_composite(fl)
