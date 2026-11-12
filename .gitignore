@@ -25,3 +25,5 @@ update-hermes.sh
 
 # Monetization planning — private, never committed
 monetization/
+dino/video_only.mp4
+dino/voice_full.wav
